@@ -1,10 +1,13 @@
+import os
 import requests
 import html2text
 from readability.readability import Document
 from itertools import islice
 from duckduckgo_search import DDGS
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 from langchain_core.tools import tool
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 
 
 class SearchDDGInput(BaseModel):
@@ -98,4 +101,82 @@ def fetch_page(url, page_num=0, timeout_sec=10):
     }
 
 
-all_tools = [search_ddg, fetch_page]
+class SlackThreadHistoryInput(BaseModel):
+    channel_id: str = Field(description="SlackチャンネルID")
+    thread_ts: str = Field(description="スレッドのタイムスタンプ")
+
+
+@tool(args_schema=SlackThreadHistoryInput)
+def get_slack_thread_history(channel_id: str, thread_ts: str):
+    """
+    ## Toolの説明
+    Slackスレッドの会話履歴を取得するツールです。
+
+    ## Toolの動作方法
+    1. 指定されたチャンネルIDとスレッドタイムスタンプを使用
+    2. Slack APIを呼び出して会話履歴を取得
+    3. 会話履歴を時系列で返却
+
+    ## 戻り値の形式
+    List[Dict[str, str]]:
+    - user: ユーザーID
+    - text: メッセージ内容
+    - ts: タイムスタンプ
+    """
+    client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    
+    try:
+        response = client.conversations_replies(
+            channel=channel_id,
+            ts=thread_ts,
+            inclusive=True
+        )
+        
+        return [
+            {
+                "user": msg.get("user", ""),
+                "text": msg.get("text", ""),
+                "ts": msg.get("ts", "")
+            }
+            for msg in response["messages"]
+        ]
+    except SlackApiError as e:
+        return {"error": f"Slack API error: {e.response['error']}"}
+
+
+class SlackMessageInput(BaseModel):
+    channel_id: str = Field(description="SlackチャンネルID")
+    text: str = Field(description="送信するメッセージ内容")
+    thread_ts: str = Field(description="スレッドのタイムスタンプ（任意）")
+
+
+@tool(args_schema=SlackMessageInput)
+def send_slack_message(channel_id: str, text: str, thread_ts: str = None):
+    """
+    ## Toolの説明
+    Slackにメッセージを送信するツールです。
+
+    ## Toolの動作方法
+    1. 指定されたチャンネルIDとメッセージ内容を使用
+    2. オプションでスレッドタイムスタンプを指定
+    3. Slack APIを呼び出してメッセージを送信
+
+    ## 戻り値の形式
+    Dict[str, str]:
+    - ts: 送信したメッセージのタイムスタンプ
+    """
+    client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    
+    try:
+        response = client.chat_postMessage(
+            channel=channel_id,
+            text=text,
+            thread_ts=thread_ts
+        )
+        
+        return {"ts": response["ts"]}
+    except SlackApiError as e:
+        return {"error": f"Slack API error: {e.response['error']}"}
+
+
+all_tools = [search_ddg, fetch_page, get_slack_thread_history, send_slack_message]

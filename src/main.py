@@ -1,17 +1,18 @@
-import streamlit as st
+import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from slack_bolt import App
+from slack_bolt.adapter.socket_mode import SocketModeHandler
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.pydantic_v1 import BaseModel, Field
-from langgraph.graph import StateGraph
-from typing import List, Annotated, Literal, Sequence, TypedDict
-from langgraph.graph import END, StateGraph, START
-import asyncio
-import os
+from pydantic import BaseModel, Field
+from langgraph.graph import StateGraph, END, START
+from typing import List, Literal, TypedDict
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings
+from tools import get_slack_thread_history, send_slack_message
 
 
 class RouteQuery(BaseModel):
@@ -47,58 +48,31 @@ class GradeAnswer(BaseModel):
     )
 
 
-class GraphState(TypedDict):
-    """
-    グラフの状態を表します。
+class GraphState(BaseModel):
+    """グラフの状態を表すデータモデル"""
 
-    属性:
-        question: 質問
-        generation: LLM生成
-        documents: 文書のリスト
-    """
-
-    question: str
-    generation: str
-    documents: List[str]
+    question: str = Field(..., description="ユーザーの質問")
+    generation: str = Field("", description="LLMが生成した回答")
+    documents: List[str] = Field(default_factory=list, description="関連文書のリスト")
+    context: str = Field("", description="会話のコンテキスト（スレッド履歴）")
 
 
 async def route_question(state):
-    st.session_state.status.update(
-        label=f"**---ROUTE QUESTION---**", state="running", expanded=True
-    )
-    st.session_state.log += "---ROUTE QUESTION---" + "\n\n"
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     structured_llm_router = llm.with_structured_output(RouteQuery)
 
-    system = """あなたはユーザーの質問をベクターストアまたはウェブ検索にルーティングする専門家です。
-    ベクターストアにはエージェント、プロンプトエンジニアリング、アドバーサリアルアタックに関連する文書が含まれています。
-    これらのトピックに関する質問にはベクターストアを使用し、それ以外の場合はウェブ検索を使用してください。"""
-    route_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system),
-            ("human", "{question}"),
-        ]
-    )
+    from prompts import ROUTE_PROMPT
+    route_prompt = ROUTE_PROMPT
 
     question_router = route_prompt | structured_llm_router
 
     question = state["question"]
     source = question_router.invoke({"question": question})
     if source.datasource == "vectorstore":
-        st.session_state.placeholder.markdown("ROUTE QUESTION TO RAG")
-        st.session_state.log += "ROUTE QUESTION TO RAG" + "\n\n"
         return "vectorstore"
 
 
 async def retrieve(state):
-    st.session_state.status.update(
-        label=f"**---RETRIEVE---**", state="running", expanded=True
-    )
-    st.session_state.placeholder.markdown(
-        f"RETRIEVING…\n\nKEY WORD:{state['question']}"
-    )
-    st.session_state.log += f"RETRIEVING…\n\nKEY WORD:{state['question']}" + "\n\n"
-
     embd = OpenAIEmbeddings()
 
     urls = [
@@ -124,104 +98,35 @@ async def retrieve(state):
 
     question = state["question"]
     documents = retriever.invoke(question)
-    st.session_state.placeholder.markdown("RETRIEVE SUCCESS!!")
     return {"documents": documents, "question": question}
 
 
 async def grade_documents(state):
-    st.session_state.number_trial += 1
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     structured_llm_grader = llm.with_structured_output(GradeDocuments)
 
-    system = """あなたは、ユーザーの質問に対して取得されたドキュメントの関連性を評価する採点者です。
-ドキュメントにユーザーの質問に関連するキーワードや意味が含まれている場合、それを関連性があると評価してください。
-目的は明らかに誤った取得を排除することです。厳密なテストである必要はありません。
-ドキュメントが質問に関連しているかどうかを示すために、バイナリスコア「yes」または「no」を与えてください。"""
-    grade_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system),
-            (
-                "human",
-                "Retrieved document: \n\n {document} \n\n User question: {question}",
-            ),
-        ]
-    )
+    from prompts import GRADE_DOCUMENTS_PROMPT
+    grade_prompt = GRADE_DOCUMENTS_PROMPT
 
     retrieval_grader = grade_prompt | structured_llm_grader
-    st.session_state.status.update(
-        label=f"**---CHECK DOCUMENT RELEVANCE TO QUESTION---**",
-        state="running",
-        expanded=False,
-    )
-    st.session_state.log += "**---CHECK DOCUMENT RELEVANCE TO QUESTION---**" + "\n\n"
     question = state["question"]
     documents = state["documents"]
     filtered_docs = []
-    i = 0
+
     for d in documents:
-        if st.session_state.number_trial <= 2:
-            file_name = d.metadata["source"]
-            file_name = os.path.basename(file_name.replace("\\", "/"))
-            i += 1
-            score = retrieval_grader.invoke(
-                {"question": question, "document": d.page_content}
-            )
-            grade = score.binary_score
-            if grade == "yes":
-                st.session_state.status.update(
-                    label=f"**---GRADE: DOCUMENT RELEVANT---**",
-                    state="running",
-                    expanded=True,
-                )
-                st.session_state.placeholder.markdown(
-                    f"DOC {i}/{len(documents)} : **RELEVANT**\n\n"
-                )
-                st.session_state.log += "---GRADE: DOCUMENT RELEVANT---" + "\n\n"
-                st.session_state.log += f"doc {i}/{len(documents)} : RELEVANT\n\n"
-                filtered_docs.append(d)
-            else:
-                st.session_state.status.update(
-                    label=f"**---GRADE: DOCUMENT NOT RELEVANT---**",
-                    state="error",
-                    expanded=True,
-                )
-                st.session_state.placeholder.markdown(
-                    f"DOC {i}/{len(documents)} : **NOT RELEVANT**\n\n"
-                )
-                st.session_state.log += "---GRADE: DOCUMENT NOT RELEVANT---" + "\n\n"
-                st.session_state.log += f"DOC {i}/{len(documents)} : NOT RELEVANT\n\n"
-        else:
-
-            filtered_docs.append(d)
-
-    if not st.session_state.number_trial <= 2:
-        st.session_state.status.update(
-            label=f"**---NO NEED TO CHECK---**", state="running", expanded=True
+        score = retrieval_grader.invoke(
+            {"question": question, "document": d.page_content}
         )
-        st.session_state.placeholder.markdown("QUERY TRANSFORMATION HAS BEEN COMPLETED")
-        st.session_state.log += "QUERY TRANSFORMATION HAS BEEN COMPLETED" + "\n\n"
+        grade = score.binary_score
+        if grade == "yes":
+            filtered_docs.append(d)
 
     return {"documents": filtered_docs, "question": question}
 
 
 async def generate(state):
-    st.session_state.status.update(
-        label=f"**---GENERATE---**", state="running", expanded=False
-    )
-    st.session_state.log += "---GENERATE---" + "\n\n"
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                """ユーザーから与えられたコンテキストを参考に質問に対し答えて下さい。""",
-            ),
-            (
-                "human",
-                """Question: {question} 
-Context: {context}""",
-            ),
-        ]
-    )
+    from prompts import GENERATION_PROMPT
+    prompt = GENERATION_PROMPT
 
     llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0)
 
@@ -233,89 +138,33 @@ Context: {context}""",
 
 
 async def transform_query(state):
-    st.session_state.status.update(
-        label=f"**---TRANSFORM QUERY---**", state="running", expanded=True
-    )
-    st.session_state.placeholder.empty()
-    st.session_state.log += "---TRANSFORM QUERY---" + "\n\n"
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-    system = """あなたは、入力された質問をベクトルストア検索に最適化されたより良いバージョンに変換する質問リライターです。
-質問を見て、質問者の意図/意味について推論してより良いベクトル検索の為の質問を作成してください。"""
-    re_write_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system),
-            (
-                "human",
-                "Here is the initial question: \n\n {question} \n Formulate an improved question.",
-            ),
-        ]
-    )
+    from prompts import REWRITE_PROMPT
+    re_write_prompt = REWRITE_PROMPT
 
     question_rewriter = re_write_prompt | llm | StrOutputParser()
     question = state["question"]
     documents = state["documents"]
     better_question = question_rewriter.invoke({"question": question})
-    st.session_state.log += f"better_question : {better_question}\n\n"
-    st.session_state.placeholder.markdown(f"better_question : {better_question}")
     return {"documents": documents, "question": better_question}
 
 
 async def decide_to_generate(state):
     filtered_documents = state["documents"]
     if not filtered_documents:
-        st.session_state.status.update(
-            label=f"**---DECISION: ALL DOCUMENTS ARE NOT RELEVANT TO QUESTION, TRANSFORM QUERY---**",
-            state="error",
-            expanded=False,
-        )
-        st.session_state.log += (
-            "---DECISION: ALL DOCUMENTS ARE NOT RELEVANT TO QUESTION, TRANSFORM QUERY---"
-            + "\n\n"
-        )
         return "transform_query"
     else:
-        st.session_state.status.update(
-            label=f"**---DECISION: GENERATE---**", state="running", expanded=False
-        )
-        st.session_state.log += "---DECISION: GENERATE---" + "\n\n"
         return "generate"
 
 
 async def grade_generation_v_documents_and_question(state):
-    st.session_state.number_trial += 1
-    st.session_state.status.update(
-        label=f"**---CHECK HALLUCINATIONS---**", state="running", expanded=False
-    )
-    st.session_state.log += "---CHECK HALLUCINATIONS---" + "\n\n"
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     structured_llm_grader = llm.with_structured_output(GradeHallucinations)
 
-    system = """あなたは、LLMの生成が取得された事実のセットに基づいているか/サポートされているかを評価する採点者です。
-バイナリスコア「yes」または「no」を与えてください。「yes」は、回答が事実のセットに基づいている/サポートされていることを意味します。"""
-    hallucination_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system),
-            (
-                "human",
-                "Set of facts: \n\n {documents} \n\n LLM generation: {generation}",
-            ),
-        ]
-    )
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    structured_llm_grader = llm.with_structured_output(GradeAnswer)
-
-    system = """あなたは、回答が質問に対処しているか/解決しているかを評価する採点者です。
-バイナリスコア「yes」または「no」を与えてください。「yes」は、回答が質問を解決していることを意味します。"""
-    answer_prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", system),
-            (
-                "human",
-                "User question: \n\n {question} \n\n LLM generation: {generation}",
-            ),
-        ]
-    )
+    from prompts import HALLUCINATION_PROMPT, ANSWER_GRADE_PROMPT
+    hallucination_prompt = HALLUCINATION_PROMPT
+    answer_prompt = ANSWER_GRADE_PROMPT
 
     answer_grader = answer_prompt | structured_llm_grader
     hallucination_grader = hallucination_prompt | structured_llm_grader
@@ -326,164 +175,134 @@ async def grade_generation_v_documents_and_question(state):
         {"documents": documents, "generation": generation}
     )
     grade = score.binary_score
-    if st.session_state.number_trial <= 3:
+    if grade == "yes":
+        score = answer_grader.invoke({"question": question, "generation": generation})
+        grade = score.binary_score
         if grade == "yes":
-            st.session_state.placeholder.markdown(
-                "DECISION: ANSWER IS BASED ON A SET OF FACTS"
-            )
-            st.session_state.log += (
-                "---DECISION: ANSWER IS BASED ON A SET OF FACTS---" + "\n\n"
-            )
-            st.session_state.log += "---GRADE GENERATION vs QUESTION---" + "\n\n"
-            score = answer_grader.invoke(
-                {"question": question, "generation": generation}
-            )
-            grade = score.binary_score
-            st.session_state.status.update(
-                label=f"**---GRADE GENERATION vs QUESTION---**",
-                state="running",
-                expanded=True,
-            )
-            if grade == "yes":
-                st.session_state.status.update(
-                    label=f"**---DECISION: GENERATION ADDRESSES QUESTION---**",
-                    state="running",
-                    expanded=True,
-                )
-                with st.session_state.placeholder:
-                    st.markdown("**USEFUL!!**")
-                    st.markdown(f"question : {question}")
-                    st.markdown(f"generation : {generation}")
-                    st.session_state.log += (
-                        "---DECISION: GENERATION ADDRESSES QUESTION---" + "\n\n"
-                    )
-                    st.session_state.log += f"USEFUL!!\n\n"
-                    st.session_state.log += f"question:{question}\n\n"
-                    st.session_state.log += f"generation:{generation}\n\n"
-                return "useful"
-            else:
-                st.session_state.number_trial -= 1
-                st.session_state.status.update(
-                    label=f"**---DECISION: GENERATION DOES NOT ADDRESS QUESTION---**",
-                    state="error",
-                    expanded=True,
-                )
-                with st.session_state.placeholder:
-                    st.markdown("**NOT USEFUL**")
-                    st.markdown(f"question:{question}")
-                    st.markdown(f"generation:{generation}")
-                    st.session_state.log += (
-                        "---DECISION: GENERATION DOES NOT ADDRESS QUESTION---" + "\n\n"
-                    )
-                    st.session_state.log += f"NOT USEFUL\n\n"
-                    st.session_state.log += f"question:{question}\n\n"
-                    st.session_state.log += f"generation:{generation}\n\n"
-                return "not useful"
+            return "useful"
         else:
-            st.session_state.status.update(
-                label=f"**---DECISION: GENERATION IS NOT GROUNDED IN DOCUMENTS, RE-TRY---**",
-                state="error",
-                expanded=True,
-            )
-            with st.session_state.placeholder:
-                st.markdown("not grounded")
-                st.markdown(f"question:{question}")
-                st.markdown(f"generation:{generation}")
-                st.session_state.log += (
-                    "---DECISION: GENERATION IS NOT GROUNDED IN DOCUMENTS, RE-TRY---"
-                    + "\n\n"
-                )
-                st.session_state.log += f"not grounded\n\n"
-                st.session_state.log += f"question:{question}\n\n"
-                st.session_state.log += f"generation:{generation}\n\n"
-            return "not supported"
+            return "not useful"
     else:
-        st.session_state.status.update(
-            label=f"**---NO NEED TO CHECK---**", state="running", expanded=True
-        )
-        st.session_state.placeholder.markdown("TRIAL LIMIT EXCEEDED")
-        st.session_state.log += "---NO NEED TO CHECK---" + "\n\n"
-        st.session_state.log += "TRIAL LIMIT EXCEEDED" + "\n\n"
-        return "useful"
+        return "not supported"
 
 
+import logging
+from functools import wraps
+
+# ロガーの設定
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
+def log_errors(func):
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {str(e)}", exc_info=True)
+            raise
+
+    return wrapper
+
+
+@log_errors
 async def run_workflow(inputs):
-    st.session_state.number_trial = 0
-    with st.status(
-        label="**GO!!**", expanded=True, state="running"
-    ) as st.session_state.status:
-        st.session_state.placeholder = st.empty()
-        value = await st.session_state.workflow.ainvoke(inputs)
-
-    st.session_state.placeholder.empty()
-    st.session_state.message_placeholder = st.empty()
-    st.session_state.status.update(
-        label="**FINISH!!**", state="complete", expanded=False
-    )
-    st.session_state.message_placeholder.markdown(value["generation"])
-    with st.popover("ログ"):
-        st.markdown(st.session_state.log)
+    logger.info(f"Starting workflow with inputs: {inputs}")
+    value = await workflow.ainvoke(inputs)
+    logger.info("Workflow completed successfully")
+    return value["generation"]
 
 
-def st_rag_langgraph():
+# ワークフローの初期化
+workflow = StateGraph(GraphState)
 
-    if "log" not in st.session_state:
-        st.session_state.log = ""
+workflow.add_node("retrieve", retrieve)
+workflow.add_node("grade_documents", grade_documents)
+workflow.add_node("generate", generate)
+workflow.add_node("transform_query", transform_query)
 
-    if "status_container" not in st.session_state:
-        st.session_state.status_container = st.empty()
+workflow.add_conditional_edges(
+    START,
+    route_question,
+    {
+        "vectorstore": "retrieve",
+    },
+)
+workflow.add_edge("retrieve", "grade_documents")
+workflow.add_conditional_edges(
+    "grade_documents",
+    decide_to_generate,
+    {
+        "transform_query": "transform_query",
+        "generate": "generate",
+    },
+)
+workflow.add_edge("transform_query", "retrieve")
+workflow.add_conditional_edges(
+    "generate",
+    grade_generation_v_documents_and_question,
+    {
+        "not supported": "generate",
+        "useful": END,
+        "not useful": "transform_query",
+    },
+)
 
-    if not hasattr(st.session_state, "workflow"):
+app = workflow.compile()
+app = app.with_config(recursion_limit=10, run_name="Agent", tags=["Agent"])
 
-        workflow = StateGraph(GraphState)
 
-        workflow.add_node("retrieve", retrieve)
-        workflow.add_node("grade_documents", grade_documents)
-        workflow.add_node("generate", generate)
-        workflow.add_node("transform_query", transform_query)
+# Slackアプリの初期化
+slack_app = App(token=os.environ["SLACK_BOT_TOKEN"])
 
-        workflow.add_conditional_edges(
-            START,
-            route_question,
-            {
-                "vectorstore": "retrieve",
-            },
+
+@slack_app.event("app_mention")
+def handle_app_mention_events(body, say):
+    try:
+        event = body["event"]
+        channel_id = event["channel"]
+        thread_ts = event.get("thread_ts", event["ts"])
+
+        # スレッド履歴を取得
+        thread_history = get_slack_thread_history(channel_id, thread_ts)
+
+        # 最新の質問を取得
+        question = event["text"].replace(f"<@{os.environ['SLACK_BOT_ID']}>", "").strip()
+
+        # RAGワークフローを実行
+        inputs = {
+            "question": question,
+            "context": thread_history,
+            "documents": [],
+            "generation": "",
+        }
+
+        logger.info(f"Processing question: {question}")
+        result = asyncio.run(run_workflow(inputs))
+
+        # 結果をSlackに送信
+        send_slack_message(
+            channel_id=channel_id, text=result["generation"], thread_ts=thread_ts
         )
-        workflow.add_edge("retrieve", "grade_documents")
-        workflow.add_conditional_edges(
-            "grade_documents",
-            decide_to_generate,
-            {
-                "transform_query": "transform_query",
-                "generate": "generate",
-            },
-        )
-        workflow.add_edge("transform_query", "retrieve")
-        workflow.add_conditional_edges(
-            "generate",
-            grade_generation_v_documents_and_question,
-            {
-                "not supported": "generate",
-                "useful": END,
-                "not useful": "transform_query",
-            },
+        logger.info("Response sent successfully")
+
+    except Exception as e:
+        logger.error(f"Error handling app mention: {str(e)}", exc_info=True)
+        send_slack_message(
+            channel_id=channel_id,
+            text="申し訳ありません、エラーが発生しました。もう一度試してください。",
+            thread_ts=thread_ts,
         )
 
-        app = workflow.compile()
-        app = app.with_config(recursion_limit=10, run_name="Agent", tags=["Agent"])
-        app.name = "Agent"
-        st.session_state.workflow = app
 
-    st.title("Adaptive RAG by LangGraph")
-
-    if prompt := st.chat_input("質問を入力してください"):
-        st.session_state.log = ""
-        with st.chat_message("user", avatar="😊"):
-            st.markdown(prompt)
-
-        inputs = {"question": prompt}
-        asyncio.run(run_workflow(inputs))
+def start_slack_bot():
+    handler = SocketModeHandler(slack_app, os.environ["SLACK_APP_TOKEN"])
+    handler.start()
 
 
 if __name__ == "__main__":
-    st_rag_langgraph()
+    # Slackbotを起動
+    start_slack_bot()

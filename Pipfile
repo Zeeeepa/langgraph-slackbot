@@ -11,14 +11,16 @@ html2text = "*"
 readability = "*"
 readability-lxml = "*"
 lxml = {extras = ["html_clean"], version = "*"}
+lxml-html-clean = "*"
 langchain-openai = "*"
-streamlit = "*"
 langchain-community = "*"
 tiktoken = "*"
 langchainhub = "*"
 chromadb = "*"
 tavily-python = "*"
 bs4 = "*"
+slack-bolt = "*"
+slack-sdk = "*"
 
 [dev-packages]
 
