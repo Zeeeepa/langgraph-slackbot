@@ -4,23 +4,20 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-langgraph = "*"
-langchain = "*"
-duckduckgo-search = "*"
-html2text = "*"
-readability = "*"
-readability-lxml = "*"
-lxml = {extras = ["html_clean"], version = "*"}
-lxml-html-clean = "*"
-langchain-openai = "*"
-langchain-community = "*"
-tiktoken = "*"
-langchainhub = "*"
-chromadb = "*"
-tavily-python = "*"
-bs4 = "*"
 slack-bolt = "*"
-slack-sdk = "*"
+langchain-openai = "*"
+langchain-core = "*"
+langchain = "*"
+langchain-community = "*"
+pydantic = "*"
+langgraph = "*"
+duckduckgo-search = "*"
+readability-lxml = "*"
+html2text = "*"
+markdown = "*"
+beautifulsoup4 = "*"
+pygithub = "*"
+uuid = "*"
 
 [dev-packages]
 
