@@ -1,10 +1,16 @@
+"""
+Main entry point for the Multi-Threaded Agentic Slackbot.
+
+This module initializes the Slack app and starts the bot.
+"""
+
 import os
 import asyncio
 import logging
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
-from agents.slack_integration import SlackIntegration
-from implementation_phases import ImplementationPhases
+from src.integrations.slack import SlackIntegration
+from src.workflows.implementation_phases import ImplementationPhases
 
 # Configure logging
 logging.basicConfig(
