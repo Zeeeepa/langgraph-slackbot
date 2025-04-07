@@ -83,7 +83,7 @@ jobs:
           with open("CODEGEN_PROGRESS.md", "a") as f:
               for req in requirements:
                   if req not in existing_reqs:
-                      f.write(f"| {req} | Not Started | {datetime.now().strftime('%Y-%m-%d')} |\n")
+                      f.write(f"| {req} | Not Started | {datetime.now().strftime("%Y-%m-%d")} |\n")
           '
 
       - name: Send notification to Slack
@@ -122,7 +122,7 @@ jobs:
                       "type": "section",
                       "text": {
                           "type": "mrkdwn",
-                          "text": f"*Status*: {'✅ Requirements Updated' if is_update else '🆕 New Requirements Detected'}"
+                          "text": f"*Status*: {"✅ Requirements Updated" if is_update else "🆕 New Requirements Detected"}"
                       }
                   },
                   {
@@ -170,7 +170,7 @@ jobs:
               response = client.chat_postMessage(**message)
               print(f"Message sent: {response.data}")
           except SlackApiError as e:
-              print(f"Error sending message: {e.response['error']}")
+              print(f"Error sending message: {e.response["error"]}")
           '
 
   # This job would be triggered by a Slack interaction or manually
