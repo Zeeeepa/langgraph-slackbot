@@ -47,11 +47,32 @@ class AIUserAgent:
         self.executor = ThreadPoolExecutor(max_workers=5)
         
         # GitHub integration
+        self.github_token = github_token
         self.github_client = None
         self.repo = None
+        
         if github_token and repo_name:
-            self.github_client = Github(github_token)
+            self.set_repository(repo_name)
+    
+    def set_repository(self, repo_name: str):
+        """
+        Set the GitHub repository for the agent.
+        
+        Args:
+            repo_name: GitHub repository name (format: "owner/repo")
+        """
+        if not self.github_token:
+            logger.error("GitHub token not configured.")
+            return False
+        
+        try:
+            self.github_client = Github(self.github_token)
             self.repo = self.github_client.get_repo(repo_name)
+            logger.info(f"Set repository to {repo_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting repository: {str(e)}")
+            return False
     
     async def initialize_project(self):
         """Initialize the project by analyzing requirements and creating an implementation plan."""

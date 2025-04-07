@@ -39,7 +39,7 @@ class SlackIntegration:
             slack_bot_token: Slack bot token for API access
             slack_app_token: Slack app token for Socket Mode
             github_token: GitHub API token for repository access
-            repo_name: GitHub repository name (format: "owner/repo")
+            repo_name: GitHub repository name (format: "owner/repo") - deprecated, use project_management instead
             model_name: LLM model to use
             project_dir: Directory containing project files
             max_workers: Maximum number of worker threads
@@ -48,17 +48,20 @@ class SlackIntegration:
         self.slack_bot_token = slack_bot_token
         self.slack_app_token = slack_app_token
         
+        # Project management
+        self.projects = {}
+        if repo_name:  # For backward compatibility
+            self.add_project("default", repo_name)
+        
         # Initialize agents
         self.ai_user_agent = AIUserAgent(
             project_dir=project_dir,
             github_token=github_token,
-            repo_name=repo_name,
             model_name=model_name
         )
         
         self.assistant_agent = AssistantAgent(
             github_token=github_token,
-            repo_name=repo_name,
             model_name=model_name,
             max_workers=max_workers
         )
@@ -67,6 +70,50 @@ class SlackIntegration:
         self.message_handlers = {}
         self.running = False
         self.message_thread = None
+    
+    def add_project(self, project_name: str, repo_url: str):
+        """
+        Add a project for management.
+        
+        Args:
+            project_name: Name of the project
+            repo_url: GitHub repository URL or name (format: "owner/repo")
+        """
+        # Extract owner/repo format if full URL is provided
+        if repo_url.startswith("http"):
+            parts = repo_url.strip("/").split("/")
+            if len(parts) >= 2:
+                repo_name = f"{parts[-2]}/{parts[-1]}"
+            else:
+                logger.error(f"Invalid repository URL: {repo_url}")
+                return
+        else:
+            repo_name = repo_url
+        
+        self.projects[project_name] = {
+            "repo_name": repo_name,
+            "tasks": {}
+        }
+        
+        logger.info(f"Added project '{project_name}' with repository '{repo_name}'")
+    
+    def get_project(self, project_name: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Get a project by name.
+        
+        Args:
+            project_name: Name of the project (default: first project)
+            
+        Returns:
+            Project information or None if not found
+        """
+        if not project_name:
+            # Return the first project if no name is specified
+            if self.projects:
+                return next(iter(self.projects.values()))
+            return None
+        
+        return self.projects.get(project_name)
     
     def start(self):
         """Start the Slack integration and agent processing."""
@@ -149,23 +196,28 @@ class SlackIntegration:
             # Get thread history for context
             thread_history = await self._get_thread_history(channel_id, thread_ts)
             
+            # Check if this is a project management request
+            if re.search(r"\b(add|create|register)\s+project\b", text, re.IGNORECASE):
+                await self._handle_project_management(channel_id, thread_ts, text)
+                return
+            
             # Check if this is a project initialization request
-            if re.search(r"\b(initialize|init|start|create)\s+project\b", text, re.IGNORECASE):
+            if re.search(r"\b(initialize|init|start|create)\\s+project\\b", text, re.IGNORECASE):
                 await self._handle_project_initialization(channel_id, thread_ts, text)
                 return
             
             # Check if this is a task request
-            if re.search(r"\b(implement|add|create|develop)\s+(feature|task|component)\b", text, re.IGNORECASE):
+            if re.search(r"\b(implement|add|create|develop)\\s+(feature|task|component)\\b", text, re.IGNORECASE):
                 await self._handle_task_request(channel_id, thread_ts, text)
                 return
             
             # Check if this is a project state analysis request
-            if re.search(r"\b(analyze|check|compare|status)\s+(project|state)\b", text, re.IGNORECASE):
+            if re.search(r"\b(analyze|check|compare|status)\\s+(project|state)\\b", text, re.IGNORECASE):
                 await self._handle_project_state_analysis(channel_id, thread_ts, text)
                 return
             
             # Check if this is a task status request
-            if re.search(r"\b(status|progress)\s+(of|for)\s+task\b", text, re.IGNORECASE):
+            if re.search(r"\b(status|progress)\\s+(of|for)\\s+task\\b", text, re.IGNORECASE):
                 await self._handle_task_status_request(channel_id, thread_ts, text)
                 return
             
@@ -179,6 +231,7 @@ class SlackIntegration:
             await self._send_slack_message(
                 channel_id=channel_id,
                 text="I'm not sure how to handle that request. You can ask me to:\n"
+                     "- Add a project\n"
                      "- Initialize a project\n"
                      "- Implement a feature or task\n"
                      "- Analyze the project state\n"
@@ -195,6 +248,40 @@ class SlackIntegration:
                 thread_ts=thread_ts
             )
     
+    async def _handle_project_management(self, channel_id: str, thread_ts: str, text: str):
+        """
+        Handle project management requests.
+        
+        Args:
+            channel_id: Slack channel ID
+            thread_ts: Thread timestamp
+            text: Message text
+        """
+        # Extract project name and repository URL
+        project_match = re.search(r"\b(project|name)[:\s]+([a-zA-Z0-9_-]+)", text, re.IGNORECASE)
+        repo_match = re.search(r"\b(repo|repository|url)[:\s]+(https?://[^\s]+|[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)", text, re.IGNORECASE)
+        
+        if not project_match or not repo_match:
+            await self._send_slack_message(
+                channel_id=channel_id,
+                text="Please provide both a project name and repository URL/name.\n"
+                     "Example: `@bot add project name:myproject repo:owner/repo`",
+                thread_ts=thread_ts
+            )
+            return
+        
+        project_name = project_match.group(2)
+        repo_url = repo_match.group(2)
+        
+        # Add the project
+        self.add_project(project_name, repo_url)
+        
+        await self._send_slack_message(
+            channel_id=channel_id,
+            text=f"Project '{project_name}' added successfully with repository '{repo_url}'.",
+            thread_ts=thread_ts
+        )
+    
     async def _handle_project_initialization(self, channel_id: str, thread_ts: str, text: str):
         """
         Handle project initialization requests.
@@ -204,6 +291,27 @@ class SlackIntegration:
             thread_ts: Thread timestamp
             text: Message text
         """
+        # Extract project name if specified
+        project_match = re.search(r"\b(project|name)[:\s]+([a-zA-Z0-9_-]+)", text, re.IGNORECASE)
+        project_name = project_match.group(2) if project_match else None
+        
+        # Get the project
+        project = self.get_project(project_name)
+        if not project:
+            if project_name:
+                await self._send_slack_message(
+                    channel_id=channel_id,
+                    text=f"Project '{project_name}' not found. Please add it first.",
+                    thread_ts=thread_ts
+                )
+            else:
+                await self._send_slack_message(
+                    channel_id=channel_id,
+                    text="No projects found. Please add a project first.",
+                    thread_ts=thread_ts
+                )
+            return
+        
         await self._send_slack_message(
             channel_id=channel_id,
             text="Initializing project... This may take a few minutes.",
@@ -211,6 +319,9 @@ class SlackIntegration:
         )
         
         try:
+            # Set the repository for the AI User Agent
+            self.ai_user_agent.set_repository(project["repo_name"])
+            
             # Initialize the project
             implementation_plan = await self.ai_user_agent.initialize_project()
             
@@ -256,280 +367,6 @@ class SlackIntegration:
                 text=f"An error occurred during project initialization: {str(e)}",
                 thread_ts=thread_ts
             )
-    
-    async def _handle_task_request(self, channel_id: str, thread_ts: str, text: str):
-        """
-        Handle task implementation requests.
-        
-        Args:
-            channel_id: Slack channel ID
-            thread_ts: Thread timestamp
-            text: Message text
-        """
-        # Extract task information from the message
-        task_id = f"task-{uuid.uuid4().hex[:8]}"
-        
-        await self._send_slack_message(
-            channel_id=channel_id,
-            text=f"Processing task request... Task ID: {task_id}",
-            thread_ts=thread_ts
-        )
-        
-        try:
-            # Formulate a request for the Assistant Agent
-            request = await self.ai_user_agent.formulate_assistant_request(text)
-            
-            if not request:
-                # If formulation fails, use the original text as the request
-                request = text
-            
-            # Add the task to the Assistant Agent
-            task = self.assistant_agent.add_task(
-                task_id=task_id,
-                description=request,
-                priority="medium"
-            )
-            
-            await self._send_slack_message(
-                channel_id=channel_id,
-                text=f"Task added to the queue with ID: {task_id}\n\n"
-                     f"*Task Description:*\n{request}\n\n"
-                     f"You can check the status of this task by asking: 'What's the status of task {task_id}?'",
-                thread_ts=thread_ts
-            )
-        
-        except Exception as e:
-            logger.error(f"Error handling task request: {str(e)}", exc_info=True)
-            
-            await self._send_slack_message(
-                channel_id=channel_id,
-                text=f"An error occurred while processing the task request: {str(e)}",
-                thread_ts=thread_ts
-            )
-    
-    async def _handle_project_state_analysis(self, channel_id: str, thread_ts: str, text: str):
-        """
-        Handle project state analysis requests.
-        
-        Args:
-            channel_id: Slack channel ID
-            thread_ts: Thread timestamp
-            text: Message text
-        """
-        await self._send_slack_message(
-            channel_id=channel_id,
-            text="Analyzing project state... This may take a few minutes.",
-            thread_ts=thread_ts
-        )
-        
-        try:
-            # Analyze the project state
-            analysis = await self.ai_user_agent.compare_project_state()
-            
-            if not analysis:
-                await self._send_slack_message(
-                    channel_id=channel_id,
-                    text="Project state analysis failed. Make sure the project is initialized and GitHub is configured.",
-                    thread_ts=thread_ts
-                )
-                return
-            
-            # Format the analysis for Slack
-            completed = analysis.get("completed", [])
-            partial = analysis.get("partial", [])
-            missing = analysis.get("missing", [])
-            deviations = analysis.get("deviations", [])
-            next_steps = analysis.get("next_steps", [])
-            
-            message = "*Project State Analysis:*\n\n"
-            
-            # Add completed tasks
-            message += "*Completed Tasks:*\n"
-            if completed:
-                for task_id in completed:
-                    message += f"- {task_id}\n"
-            else:
-                message += "- No completed tasks\n"
-            
-            # Add partially implemented tasks
-            message += "\n*Partially Implemented Tasks:*\n"
-            if partial:
-                for task_info in partial:
-                    task_id = task_info.get("task_id", "")
-                    progress = task_info.get("progress", 0)
-                    missing_info = task_info.get("missing", "")
-                    message += f"- {task_id} (Progress: {progress*100:.0f}%)\n  Missing: {missing_info}\n"
-            else:
-                message += "- No partially implemented tasks\n"
-            
-            # Add missing tasks
-            message += "\n*Missing Tasks:*\n"
-            if missing:
-                for task_id in missing:
-                    message += f"- {task_id}\n"
-            else:
-                message += "- No missing tasks\n"
-            
-            # Add deviations
-            if deviations:
-                message += "\n*Deviations from Plan:*\n"
-                for deviation in deviations:
-                    message += f"- {deviation}\n"
-            
-            # Add next steps
-            message += "\n*Recommended Next Steps:*\n"
-            if next_steps:
-                for step in next_steps:
-                    message += f"- {step}\n"
-            else:
-                message += "- No specific next steps recommended\n"
-            
-            await self._send_slack_message(
-                channel_id=channel_id,
-                text=message,
-                thread_ts=thread_ts
-            )
-            
-            # Formulate further requests if needed
-            if missing or partial:
-                further_requests = await self.ai_user_agent.formulate_further_requests(analysis)
-                
-                if further_requests:
-                    message = "*Suggested Further Requests:*\n\n"
-                    
-                    for i, request in enumerate(further_requests):
-                        message += f"*Request {i+1}:*\n{request}\n\n"
-                    
-                    await self._send_slack_message(
-                        channel_id=channel_id,
-                        text=message,
-                        thread_ts=thread_ts
-                    )
-        
-        except Exception as e:
-            logger.error(f"Error analyzing project state: {str(e)}", exc_info=True)
-            
-            await self._send_slack_message(
-                channel_id=channel_id,
-                text=f"An error occurred during project state analysis: {str(e)}",
-                thread_ts=thread_ts
-            )
-    
-    async def _handle_task_status_request(self, channel_id: str, thread_ts: str, text: str):
-        """
-        Handle task status requests.
-        
-        Args:
-            channel_id: Slack channel ID
-            thread_ts: Thread timestamp
-            text: Message text
-        """
-        # Extract task ID from the message
-        match = re.search(r"\b(task|task-id|id)[:\s]+([a-zA-Z0-9-]+)", text, re.IGNORECASE)
-        
-        if not match:
-            # If no specific task ID, show all tasks
-            tasks = self.assistant_agent.get_all_tasks()
-            
-            if not tasks:
-                await self._send_slack_message(
-                    channel_id=channel_id,
-                    text="No tasks found.",
-                    thread_ts=thread_ts
-                )
-                return
-            
-            message = "*All Tasks:*\n\n"
-            
-            for task_info in tasks:
-                task_id = task_info.get("task_id", "")
-                status = task_info.get("status", "")
-                priority = task_info.get("priority", "")
-                
-                message += f"*Task ID:* {task_id}\n"
-                message += f"*Status:* {status}\n"
-                message += f"*Priority:* {priority}\n"
-                
-                if task_info.get("branch_name"):
-                    message += f"*Branch:* {task_info.get('branch_name')}\n"
-                
-                if task_info.get("error"):
-                    message += f"*Error:* {task_info.get('error')}\n"
-                
-                message += "\n"
-            
-            await self._send_slack_message(
-                channel_id=channel_id,
-                text=message,
-                thread_ts=thread_ts
-            )
-            return
-        
-        # Get status of specific task
-        task_id = match.group(2)
-        task_status = self.assistant_agent.get_task_status(task_id)
-        
-        if not task_status:
-            await self._send_slack_message(
-                channel_id=channel_id,
-                text=f"Task with ID '{task_id}' not found.",
-                thread_ts=thread_ts
-            )
-            return
-        
-        # Format the task status for Slack
-        message = f"*Task Status:*\n\n"
-        message += f"*Task ID:* {task_status.get('task_id')}\n"
-        message += f"*Description:* {task_status.get('description')}\n"
-        message += f"*Status:* {task_status.get('status')}\n"
-        message += f"*Priority:* {task_status.get('priority')}\n"
-        
-        if task_status.get("dependencies"):
-            message += f"*Dependencies:* {', '.join(task_status.get('dependencies'))}\n"
-        
-        if task_status.get("branch_name"):
-            message += f"*Branch:* {task_status.get('branch_name')}\n"
-        
-        if task_status.get("error"):
-            message += f"*Error:* {task_status.get('error')}\n"
-        
-        # Add result details if available
-        if task_status.get("result"):
-            result = task_status.get("result", {})
-            
-            if isinstance(result, dict):
-                task_type = result.get("task_type")
-                
-                if task_type == "implementation":
-                    pr_info = result.get("pull_request", {})
-                    
-                    if pr_info:
-                        message += f"\n*Pull Request:* <{pr_info.get('pr_url')}|#{pr_info.get('pr_number')}>\n"
-                        message += f"*Title:* {pr_info.get('title')}\n"
-                
-                elif task_type == "document_processing":
-                    processing_result = result.get("processing_result", {})
-                    
-                    if processing_result:
-                        message += f"\n*Processing Summary:* {processing_result.get('summary')}\n"
-                
-                elif task_type == "analysis":
-                    analysis_result = result.get("analysis_result", {})
-                    
-                    if analysis_result:
-                        message += f"\n*Analysis Type:* {analysis_result.get('analysis_type')}\n"
-                        
-                        findings = analysis_result.get("findings", [])
-                        if findings:
-                            message += "*Findings:*\n"
-                            for finding in findings:
-                                message += f"- {finding}\n"
-        
-        await self._send_slack_message(
-            channel_id=channel_id,
-            text=message,
-            thread_ts=thread_ts
-        )
     
     async def _get_thread_history(self, channel_id: str, thread_ts: str) -> List[Dict[str, Any]]:
         """
