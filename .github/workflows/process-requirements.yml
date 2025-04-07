@@ -1,0 +1,217 @@
+name: Process Requirements and Generate Code
+on:
+  repository_dispatch:
+    types: [codegen-requirements]
+
+jobs:
+  process-requirements:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.client_payload.ref }}
+          
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests slack_sdk
+
+      - name: Analyze requirements and codebase
+        id: analyze
+        run: |
+          # Read the REQUIREMENTS.md file
+          REQUIREMENTS=$(cat REQUIREMENTS.md)
+          
+          # Create a summary of the requirements
+          echo "::set-output name=requirements_summary::$(echo "$REQUIREMENTS" | head -n 10 | tr '\n' ' ')"
+          
+          # Check for previous generation markers
+          if grep -q "<!-- CODEGEN-LAST-PROCESSED:" REQUIREMENTS.md; then
+            LAST_PROCESSED=$(grep "<!-- CODEGEN-LAST-PROCESSED:" REQUIREMENTS.md | sed 's/<!-- CODEGEN-LAST-PROCESSED: \(.*\) -->/\1/')
+            echo "::set-output name=last_processed::$LAST_PROCESSED"
+            echo "::set-output name=is_update::true"
+          else
+            echo "::set-output name=is_update::false"
+          fi
+          
+          # Add timestamp to the requirements file
+          TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+          sed -i "1i<!-- CODEGEN-LAST-PROCESSED: $TIMESTAMP -->" REQUIREMENTS.md
+      
+      - name: Create progress tracking file
+        run: |
+          if [ ! -f "CODEGEN_PROGRESS.md" ]; then
+            echo "# Code Generation Progress" > CODEGEN_PROGRESS.md
+            echo "" >> CODEGEN_PROGRESS.md
+            echo "| Requirement | Status | Last Updated |" >> CODEGEN_PROGRESS.md
+            echo "|-------------|--------|--------------|" >> CODEGEN_PROGRESS.md
+          fi
+          
+          # Extract requirements as tasks and add to progress file
+          python -c '
+          import re
+          import os
+          from datetime import datetime
+          
+          with open("REQUIREMENTS.md", "r") as f:
+              content = f.read()
+          
+          # Extract requirements using regex (assuming they are in a list format with - or * or numbers)
+          requirements = re.findall(r"^[*-] (.+)$|^\d+\. (.+)$", content, re.MULTILINE)
+          
+          # Flatten the tuples and remove empty matches
+          requirements = [r[0] if r[0] else r[1] for r in requirements]
+          
+          with open("CODEGEN_PROGRESS.md", "r") as f:
+              progress_content = f.readlines()
+          
+          # Check which requirements are already in the progress file
+          existing_reqs = []
+          for line in progress_content:
+              if line.startswith("|") and not line.startswith("| Requirement"):
+                  parts = line.split("|")
+                  if len(parts) > 1:
+                      existing_reqs.append(parts[1].strip())
+          
+          # Add new requirements to the progress file
+          with open("CODEGEN_PROGRESS.md", "a") as f:
+              for req in requirements:
+                  if req not in existing_reqs:
+                      f.write(f"| {req} | Not Started | {datetime.now().strftime('%Y-%m-%d')} |\n")
+          '
+
+      - name: Send notification to Slack
+        if: success()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: |
+          python -c '
+          import os
+          import json
+          from slack_sdk import WebClient
+          from slack_sdk.errors import SlackApiError
+          
+          client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+          
+          # Read the first few lines of REQUIREMENTS.md for context
+          with open("REQUIREMENTS.md", "r") as f:
+              requirements_preview = "".join(f.readlines()[:10])
+          
+          # Determine if this is an update or initial processing
+          is_update = "${{ steps.analyze.outputs.is_update }}" == "true"
+          
+          message = {
+              "channel": os.environ["SLACK_CHANNEL_ID"],
+              "text": "Requirements Processing Complete",
+              "blocks": [
+                  {
+                      "type": "header",
+                      "text": {
+                          "type": "plain_text",
+                          "text": "🤖 Requirements Processing Complete"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"*Status*: {'✅ Requirements Updated' if is_update else '🆕 New Requirements Detected'}"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"*Requirements Preview*:\n```{requirements_preview}```"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": "Would you like me to generate code based on these requirements?"
+                      }
+                  },
+                  {
+                      "type": "actions",
+                      "elements": [
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "Generate Code"
+                              },
+                              "style": "primary",
+                              "value": "generate_code",
+                              "action_id": "generate_code"
+                          },
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "Review Requirements First"
+                              },
+                              "value": "review_requirements",
+                              "action_id": "review_requirements"
+                          }
+                      ]
+                  }
+              ]
+          }
+          
+          try:
+              response = client.chat_postMessage(**message)
+              print(f"Message sent: {response.data}")
+          except SlackApiError as e:
+              print(f"Error sending message: {e.response['error']}")
+          '
+
+  # This job would be triggered by a Slack interaction or manually
+  generate-code:
+    needs: process-requirements
+    runs-on: ubuntu-latest
+    if: false  # This job is not automatically triggered, but would be triggered by a Slack interaction
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests slack_sdk
+
+      - name: Generate code based on requirements
+        run: |
+          # This is where you would integrate with your AI code generation system
+          # For example, calling an API or running a local model
+          echo "Generating code based on requirements..."
+          
+          # Example of how you might call an external API
+          # curl -X POST "https://your-codegen-api.com/generate" \
+          #   -H "Content-Type: application/json" \
+          #   -d "{\"requirements\": \"$(cat REQUIREMENTS.md)\"}"
+          
+      - name: Create Pull Request with generated code
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Auto-generated code from requirements"
+          title: "Auto-generated code from requirements"
+          body: |
+            This PR contains auto-generated code based on the requirements in REQUIREMENTS.md.
+            
+            Please review the changes and make any necessary adjustments.
+          branch: auto-generated-code
+          base: main
