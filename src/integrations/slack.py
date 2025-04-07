@@ -419,7 +419,7 @@ class SlackIntegration:
         
         try:
             # Import here to avoid circular imports
-            from implementation_phases import ImplementationPhases
+            from src.workflows.implementation_phases import ImplementationPhases
             
             # Create implementation phases instance
             implementation_phases = ImplementationPhases(
