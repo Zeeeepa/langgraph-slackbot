@@ -229,8 +229,59 @@ class SlackIntegration:
                 return
             
             # Check if this is an implementation phases request
-            if re.search(r"\b(proceed|execute|run|start)\s+(with|the)?\s*implementation\s+phases\b", text, re.IGNORECASE):
-                await self._handle_implementation_phases(channel_id, thread_ts, text)
+            if "run implementation phases" in text.lower():
+                # Import implementation phases here to avoid circular imports
+                from src.workflows.implementation_phases import ImplementationPhases
+                
+                # Create implementation phases instance
+                implementation_phases = ImplementationPhases(
+                    ai_user_agent=self.ai_user_agent,
+                    assistant_agent=self.assistant_agent,
+                    project_dir=self.ai_user_agent.project_dir
+                )
+                
+                # Execute all phases
+                results = await implementation_phases.execute_all_phases()
+                
+                # Format the results for Slack
+                message = "Implementation phases completed successfully! Here's a summary:\n\n"
+                
+                # Phase 1: Project Initialization
+                message += "*Phase 1: Project Initialization*\n"
+                implementation_plan = results.get("phase1_project_initialization", {})
+                phases = implementation_plan.get("phases", [])
+                message += f"- Created implementation plan with {len(phases)} phases\n\n"
+                
+                # Phase 2: Development Cycle
+                message += "*Phase 2: Development Cycle*\n"
+                task_results = results.get("phase2_development_cycle", [])
+                completed_tasks = sum(1 for task in task_results if task.get("status") == "completed")
+                failed_tasks = sum(1 for task in task_results if task.get("status") == "failed")
+                message += f"- Processed {len(task_results)} tasks\n"
+                message += f"- Completed: {completed_tasks}, Failed: {failed_tasks}\n\n"
+                
+                # Phase 3: Project Management
+                message += "*Phase 3: Project Management*\n"
+                management_report = results.get("phase3_project_management", {})
+                metrics = management_report.get("metrics", {})
+                completion_percentage = metrics.get("completion_percentage", 0)
+                message += f"- Overall completion: {completion_percentage:.2f}%\n"
+                message += f"- Total tasks: {metrics.get('total_tasks', 0)}\n\n"
+                
+                # Phase 4: Post-Merge Analysis
+                message += "*Phase 4: Post-Merge Analysis*\n"
+                analysis_results = results.get("phase4_post_merge_analysis", {})
+                further_requests = analysis_results.get("further_requests", [])
+                message += f"- Identified {len(further_requests)} further requests\n"
+                
+                # Add link to results file
+                message += "\nDetailed results have been saved to implementation_phases_results.json"
+                
+                await self._send_slack_message(
+                    channel_id=channel_id,
+                    text=message,
+                    thread_ts=thread_ts
+                )
                 return
             
             # Check for custom message handlers
@@ -419,7 +470,7 @@ class SlackIntegration:
         
         try:
             # Import here to avoid circular imports
-            from implementation_phases import ImplementationPhases
+            from src.workflows.implementation_phases import ImplementationPhases
             
             # Create implementation phases instance
             implementation_phases = ImplementationPhases(
