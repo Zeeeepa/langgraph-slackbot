@@ -4,6 +4,7 @@ import logging
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from agents.slack_integration import SlackIntegration
+from implementation_phases import ImplementationPhases
 
 # Configure logging
 logging.basicConfig(
@@ -23,6 +24,13 @@ slack_integration = SlackIntegration(
     model_name=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
     project_dir=os.environ.get("PROJECT_DIR", "."),
     max_workers=int(os.environ.get("MAX_WORKERS", "5"))
+)
+
+# Initialize Implementation Phases
+implementation_phases = ImplementationPhases(
+    ai_user_agent=slack_integration.ai_user_agent,
+    assistant_agent=slack_integration.assistant_agent,
+    project_dir=os.environ.get("PROJECT_DIR", ".")
 )
 
 @slack_app.event("app_mention")
@@ -46,6 +54,19 @@ def handle_app_mention_events(body, say):
             channel=channel_id,
             thread_ts=thread_ts
         )
+
+async def execute_implementation_phases(repo_name=None):
+    """Execute all implementation phases."""
+    try:
+        # Execute all phases
+        results = await implementation_phases.execute_all_phases(repo_name)
+        
+        logger.info("Implementation phases executed successfully.")
+        return results
+    
+    except Exception as e:
+        logger.error(f"Error executing implementation phases: {str(e)}", exc_info=True)
+        raise
 
 def start_slack_bot():
     """Start the Slack bot."""
