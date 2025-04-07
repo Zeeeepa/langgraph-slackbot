@@ -12,6 +12,7 @@ A sophisticated multi-agent system for project management and document processin
 - **Document Processing**: Markdown parsing for requirement extraction and analysis
 - **Project Management**: Task tracking, dependency management, and progress monitoring
 - **Slack Integration**: Seamless communication between agents and users
+- **Multi-Project Support**: Manage multiple GitHub repositories simultaneously
 
 ## Architecture
 
@@ -43,7 +44,7 @@ The system leverages a multi-threaded architecture to handle concurrent developm
 4. Edit the `.env` file with your credentials:
    - Slack API credentials (Bot Token, App Token, Bot ID)
    - OpenAI API key
-   - GitHub token and repository name
+   - GitHub token
    - Application settings
 
 ## Usage
@@ -54,7 +55,8 @@ The system leverages a multi-threaded architecture to handle concurrent developm
    ```
 
 2. Interact with the bot in Slack:
-   - Initialize a project: `@bot initialize project`
+   - Add a project: `@bot add project name:myproject repo:owner/repo`
+   - Initialize a project: `@bot initialize project name:myproject`
    - Implement a feature: `@bot implement feature X`
    - Analyze project state: `@bot analyze project state`
    - Check task status: `@bot what's the status of task task-123?`
@@ -116,7 +118,6 @@ The application can be configured using environment variables:
 - `OPENAI_API_KEY`: OpenAI API key
 - `OPENAI_MODEL`: OpenAI model to use (default: gpt-4o-mini)
 - `GITHUB_TOKEN`: GitHub API token for repository access
-- `GITHUB_REPO`: GitHub repository name (format: "owner/repo")
 - `PROJECT_DIR`: Directory containing project files (default: ".")
 - `MAX_WORKERS`: Maximum number of worker threads (default: 5)
 

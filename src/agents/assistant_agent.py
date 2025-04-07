@@ -91,11 +91,12 @@ class AssistantAgent:
         self.max_workers = max_workers
         
         # GitHub integration
+        self.github_token = github_token
         self.github_client = None
         self.repo = None
+        
         if github_token and repo_name:
-            self.github_client = Github(github_token)
-            self.repo = self.github_client.get_repo(repo_name)
+            self.set_repository(repo_name)
         
         # Task queue and processing
         self.task_queue = queue.PriorityQueue()
@@ -104,6 +105,26 @@ class AssistantAgent:
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.workers = []
         self.running = False
+    
+    def set_repository(self, repo_name: str):
+        """
+        Set the GitHub repository for the agent.
+        
+        Args:
+            repo_name: GitHub repository name (format: "owner/repo")
+        """
+        if not self.github_token:
+            logger.error("GitHub token not configured.")
+            return False
+        
+        try:
+            self.github_client = Github(self.github_token)
+            self.repo = self.github_client.get_repo(repo_name)
+            logger.info(f"Set repository to {repo_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting repository: {str(e)}")
+            return False
     
     def start(self):
         """Start the Assistant Agent's worker threads."""

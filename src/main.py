@@ -20,7 +20,6 @@ slack_integration = SlackIntegration(
     slack_bot_token=os.environ["SLACK_BOT_TOKEN"],
     slack_app_token=os.environ["SLACK_APP_TOKEN"],
     github_token=os.environ.get("GITHUB_TOKEN"),
-    repo_name=os.environ.get("GITHUB_REPO"),
     model_name=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
     project_dir=os.environ.get("PROJECT_DIR", "."),
     max_workers=int(os.environ.get("MAX_WORKERS", "5"))
