@@ -10,6 +10,8 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from .ai_user_agent import AIUserAgent
 from .assistant_agent import AssistantAgent, Task
+from concurrent.futures import ThreadPoolExecutor
+from src.workflows.langgraph_workflow import LangGraphWorkflow
 
 # Configure logging
 logging.basicConfig(
@@ -64,6 +66,13 @@ class SlackIntegration:
             github_token=github_token,
             model_name=model_name,
             max_workers=max_workers
+        )
+        
+        # Initialize LangGraph workflow
+        self.langgraph_workflow = LangGraphWorkflow(
+            ai_user_agent=self.ai_user_agent,
+            assistant_agent=self.assistant_agent,
+            model_name=model_name
         )
         
         # Message handling
@@ -196,6 +205,51 @@ class SlackIntegration:
             # Get thread history for context
             thread_history = await self._get_thread_history(channel_id, thread_ts)
             
+            # First, try to process the message with LangGraph workflow
+            try:
+                # Extract project name if specified
+                project_match = re.search(r"\b(project|name)[:\s]+([a-zA-Z0-9_-]+)", text, re.IGNORECASE)
+                project_name = project_match.group(2) if project_match else None
+                
+                # Get the project
+                project = self.get_project(project_name)
+                repo_name = project["repo_name"] if project else None
+                
+                # Process the message with LangGraph workflow
+                await self._send_slack_message(
+                    channel_id=channel_id,
+                    text="Processing your request with our enhanced LangGraph workflow...",
+                    thread_ts=thread_ts
+                )
+                
+                result = await self.langgraph_workflow.process_message(
+                    message=text,
+                    project_name=project_name,
+                    repo_name=repo_name
+                )
+                
+                # Extract the last assistant message
+                last_message = None
+                for msg in reversed(result.get("messages", [])):
+                    if hasattr(msg, "type") and msg.type == "ai":
+                        last_message = msg.content
+                        break
+                
+                if last_message:
+                    await self._send_slack_message(
+                        channel_id=channel_id,
+                        text=last_message,
+                        thread_ts=thread_ts
+                    )
+                    return
+                
+                # If no assistant message found, fall back to legacy handlers
+                logger.info("No assistant message found in LangGraph result, falling back to legacy handlers")
+            
+            except Exception as e:
+                logger.warning(f"Error processing with LangGraph workflow, falling back to legacy handlers: {str(e)}")
+            
+            # Legacy handlers for backward compatibility
             # Check if this is a project management request
             if re.search(r"\b(add|create|register)\s+project\b", text, re.IGNORECASE):
                 await self._handle_project_management(channel_id, thread_ts, text)
