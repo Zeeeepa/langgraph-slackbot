@@ -1,125 +1,87 @@
-# Multi-Threaded Agentic Slackbot
+# Projector
 
-A sophisticated multi-agent system for project management and document processing through Slack. The system consists of two primary agents:
-
-1. **AI User Agent** - Initiates requests and manages project requirements
-2. **Assistant Agent** - Processes requests and implements solutions
+Projector is a comprehensive project management system with AI assistance, designed to help teams plan, track, and execute software development projects efficiently.
 
 ## Features
 
-- **Multi-Threading Architecture**: Concurrent request handling with thread-safe state management
-- **GitHub Integration**: Automated branch management, PR creation, and post-merge analysis
-- **Document Processing**: Markdown parsing for requirement extraction and analysis
-- **Project Management**: Task tracking, dependency management, and progress monitoring
-- **Slack Integration**: Seamless communication between agents and users
-- **Multi-Project Support**: Manage multiple GitHub repositories simultaneously
+- **Project Management**: Create and manage projects with detailed tracking
+- **AI Assistant**: Chat with an AI assistant for project planning and implementation help
+- **Implementation Tracking**: Track the progress of project implementation with a hierarchical task view
+- **GitHub Integration**: Connect projects to GitHub repositories for code management
+- **Slack Integration**: Connect projects to Slack channels for team communication
+- **Document Management**: Upload and manage project documents
+- **Task Management**: Create, assign, and track tasks with dependencies
 
 ## Architecture
 
-The system leverages a multi-threaded architecture to handle concurrent development tasks and manage GitHub project features efficiently:
+The application consists of two main components:
 
-- **AI User Agent**: Analyzes requirements from .md documents, creates implementation plans, monitors project state, and formulates requests
-- **Assistant Agent**: Processes requests, implements features using multi-threading, manages GitHub branches, and handles concurrent development
-- **Slack Integration**: Connects the agents with Slack, handles message routing and processing
+1. **Backend**: A FastAPI-based API server that handles data processing, AI integration, and external service connections
+2. **Frontend**: A React-based web application that provides the user interface
 
-## Installation
+## Getting Started
 
-1. Clone the repository:
+### Prerequisites
+
+- Python 3.8+
+- Node.js 14+
+- npm or yarn
+- GitHub account (for GitHub integration)
+- Slack workspace (for Slack integration)
+
+### Backend Setup
+
+1. Navigate to the project root directory
+2. Create a virtual environment:
    ```bash
-   git clone https://github.com/yourusername/langgraph-slackbot.git
-   cd langgraph-slackbot
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
-
-2. Install dependencies:
+3. Install dependencies:
    ```bash
-   pip install pipenv
-   pipenv install
+   pip install -r requirements.txt
    ```
-
-3. Create a `.env` file based on `.env.example`:
+4. Set up environment variables:
    ```bash
    cp .env.example .env
+   # Edit .env with your configuration
+   ```
+5. Run the backend server:
+   ```bash
+   uvicorn projector.api.main:app --reload
    ```
 
-4. Edit the `.env` file with your credentials:
-   - Slack API credentials (Bot Token, App Token, Bot ID)
-   - OpenAI API key
-   - GitHub token
-   - Application settings
+### Frontend Setup
+
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   # or
+   yarn install
+   ```
+3. Start the development server:
+   ```bash
+   npm start
+   # or
+   yarn start
+   ```
 
 ## Usage
 
-1. Start the Slackbot:
-   ```bash
-   pipenv run python src/main.py
-   ```
+1. Open your browser and navigate to http://localhost:3000
+2. Create a new project with a name, GitHub repository URL, and Slack channel
+3. Upload project requirements documents or use the chat to define requirements
+4. Click "Analyze Project" to generate an implementation plan
+5. Track progress through the implementation tree view
+6. Use the chat interface to get help from the AI assistant
 
-2. Interact with the bot in Slack:
-   - Add a project: `@bot add project name:myproject repo:owner/repo`
-   - Initialize a project: `@bot initialize project name:myproject`
-   - Implement a feature: `@bot implement feature X`
-   - Analyze project state: `@bot analyze project state`
-   - Check task status: `@bot what's the status of task task-123?`
+## API Documentation
 
-## Workflow
-
-1. **Project Initialization**
-   - User provides requirements via .md documents
-   - AI User Agent analyzes requirements and creates implementation plan
-   - Initial project structure is established
-
-2. **Development Cycle**
-   - AI User Agent formulates specific implementation requests
-   - Requests are sent to Assistant Agent via Slack
-   - Assistant Agent processes requests in multi-threaded environment
-   - Features are developed in separate branches
-   - Pull requests are created for completed features
-
-3. **Project Management**
-   - Progress tracking across all development threads
-   - Resource allocation based on priority and dependencies
-   - Automated testing and validation
-   - Documentation generation
-
-4. **Post-Merge Analysis**
-   - AI User Agent compares project state with requirements after merges
-   - Identifies gaps or additional requirements
-   - Formulates new requests to address remaining work
-   - Continuous improvement through iterative development
-
-## Project Structure
-
-```
-langgraph-slackbot/
-├── src/
-│   ├── agents/
-│   │   ├── __init__.py
-│   │   ├── ai_user_agent.py
-│   │   ├── assistant_agent.py
-│   │   └── slack_integration.py
-│   ├── main.py
-│   ├── prompts.py
-│   └── tools.py
-├── .env.example
-├── .env.dev
-├── Pipfile
-├── Pipfile.lock
-├── PROJECT.md
-└── README.md
-```
-
-## Configuration
-
-The application can be configured using environment variables:
-
-- `SLACK_BOT_TOKEN`: Slack bot token for API access
-- `SLACK_APP_TOKEN`: Slack app token for Socket Mode
-- `SLACK_BOT_ID`: Slack bot user ID
-- `OPENAI_API_KEY`: OpenAI API key
-- `OPENAI_MODEL`: OpenAI model to use (default: gpt-4o-mini)
-- `GITHUB_TOKEN`: GitHub API token for repository access
-- `PROJECT_DIR`: Directory containing project files (default: ".")
-- `MAX_WORKERS`: Maximum number of worker threads (default: 5)
+The backend API documentation is available at http://localhost:8000/docs when the backend server is running.
 
 ## Contributing
 

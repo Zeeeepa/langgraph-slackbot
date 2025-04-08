@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:5.0
+    container_name: projector-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=projector
+    restart: unless-stopped
+
+  backend:
+    build: .
+    container_name: projector-backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongodb
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/
+      - MONGODB_DB_NAME=projector
+      - DEBUG=True
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_USERNAME=${GITHUB_USERNAME}
+      - GITHUB_DEFAULT_REPO=${GITHUB_DEFAULT_REPO}
+      - SLACK_USER_TOKEN=${SLACK_USER_TOKEN}
+      - SLACK_DEFAULT_CHANNEL=${SLACK_DEFAULT_CHANNEL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+    restart: unless-stopped
+    volumes:
+      - ./docs:/app/docs
+
+volumes:
+  mongodb_data:
