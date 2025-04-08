@@ -1,130 +1,92 @@
-# Multi-Threaded Agentic Slackbot
+# LangGraph Slackbot
 
-A sophisticated multi-agent system for project management and document processing through Slack. The system consists of two primary agents:
+A multi-threaded agentic Slackbot powered by LangGraph for sophisticated agent orchestration.
 
-1. **AI User Agent** - Initiates requests and manages project requirements
-2. **Assistant Agent** - Processes requests and implements solutions
+## Overview
 
-## Features
+This project implements a Slack bot that uses LangGraph to orchestrate AI agents for handling various tasks. The bot can:
 
-- **Multi-Threading Architecture**: Concurrent request handling with thread-safe state management
-- **GitHub Integration**: Automated branch management, PR creation, and post-merge analysis
-- **Document Processing**: Markdown parsing for requirement extraction and analysis
-- **Project Management**: Task tracking, dependency management, and progress monitoring
-- **Slack Integration**: Seamless communication between agents and users
-- **Multi-Project Support**: Manage multiple GitHub repositories simultaneously
+- Analyze user requests and determine the appropriate task type
+- Route tasks to specialized agents based on their type
+- Process implementation, document processing, analysis, and project management tasks
+- Handle tasks that require human intervention
+- Maintain conversation state across interactions
 
 ## Architecture
 
-The system leverages a multi-threaded architecture to handle concurrent development tasks and manage GitHub project features efficiently:
+The system is built with the following components:
 
-- **AI User Agent**: Analyzes requirements from .md documents, creates implementation plans, monitors project state, and formulates requests
-- **Assistant Agent**: Processes requests, implements features using multi-threading, manages GitHub branches, and handles concurrent development
-- **Slack Integration**: Connects the agents with Slack, handles message routing and processing
+### LangGraph Agents
 
-## Installation
+- **Agent Graph**: A directed graph that defines the flow of task processing
+- **Agent Nodes**: Specialized functions for handling different types of tasks
+- **State Management**: Maintains conversation and task state throughout the processing flow
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/langgraph-slackbot.git
-   cd langgraph-slackbot
-   ```
+### Slack Integration
 
+- **Slack Interface**: Handles communication between LangGraph agents and Slack
+- **Event Handling**: Processes app mention events from Slack
+- **Message Routing**: Routes messages to the appropriate agent based on content
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.9+
+- Slack Bot Token and App Token
+- OpenAI API Key (or other LLM provider)
+
+### Installation
+
+1. Clone the repository
 2. Install dependencies:
-   ```bash
-   pip install pipenv
-   pipenv install
+   ```
+   pip install -r requirements.txt
+   ```
+3. Set environment variables:
+   ```
+   export SLACK_BOT_TOKEN=your-slack-bot-token
+   export SLACK_APP_TOKEN=your-slack-app-token
+   export OPENAI_API_KEY=your-openai-api-key
    ```
 
-3. Create a `.env` file based on `.env.example`:
-   ```bash
-   cp .env.example .env
-   ```
+### Running the Bot
 
-4. Edit the `.env` file with your credentials:
-   - Slack API credentials (Bot Token, App Token, Bot ID)
-   - OpenAI API key
-   - GitHub token
-   - Application settings
+```
+python src/langgraph_main.py
+```
 
 ## Usage
 
-1. Start the Slackbot:
-   ```bash
-   pipenv run python src/main.py
-   ```
+Mention the bot in a Slack channel or thread with your request. The bot will:
 
-2. Interact with the bot in Slack:
-   - Add a project: `@bot add project name:myproject repo:owner/repo`
-   - Initialize a project: `@bot initialize project name:myproject`
-   - Implement a feature: `@bot implement feature X`
-   - Analyze project state: `@bot analyze project state`
-   - Check task status: `@bot what's the status of task task-123?`
+1. Analyze your request to determine the task type
+2. Process the task using the appropriate agent
+3. Format and send the response back to the Slack thread
 
-## Workflow
+Example requests:
+- "Can you implement a feature to..."
+- "Please analyze this document..."
+- "Create a project plan for..."
+- "What do you think about..."
 
-1. **Project Initialization**
-   - User provides requirements via .md documents
-   - AI User Agent analyzes requirements and creates implementation plan
-   - Initial project structure is established
+## Development
 
-2. **Development Cycle**
-   - AI User Agent formulates specific implementation requests
-   - Requests are sent to Assistant Agent via Slack
-   - Assistant Agent processes requests in multi-threaded environment
-   - Features are developed in separate branches
-   - Pull requests are created for completed features
+### Adding New Agent Nodes
 
-3. **Project Management**
-   - Progress tracking across all development threads
-   - Resource allocation based on priority and dependencies
-   - Automated testing and validation
-   - Documentation generation
+To add a new agent node:
 
-4. **Post-Merge Analysis**
-   - AI User Agent compares project state with requirements after merges
-   - Identifies gaps or additional requirements
-   - Formulates new requests to address remaining work
-   - Continuous improvement through iterative development
+1. Define a new function in `agent_graph.py` that takes and returns an `AgentState`
+2. Add the node to the graph in the `create_agent_graph` function
+3. Update the `route_task` function to route to your new node
 
-## Project Structure
+### Extending the Slack Interface
 
-```
-langgraph-slackbot/
-├── src/
-│   ├── agents/
-│   │   ├── __init__.py
-│   │   ├── ai_user_agent.py
-│   │   ├── assistant_agent.py
-│   │   └── slack_integration.py
-│   ├── main.py
-│   ├── prompts.py
-│   └── tools.py
-├── .env.example
-├── .env.dev
-├── Pipfile
-├── Pipfile.lock
-├── PROJECT.md
-└── README.md
-```
+To add new Slack functionality:
 
-## Configuration
-
-The application can be configured using environment variables:
-
-- `SLACK_BOT_TOKEN`: Slack bot token for API access
-- `SLACK_APP_TOKEN`: Slack app token for Socket Mode
-- `SLACK_BOT_ID`: Slack bot user ID
-- `OPENAI_API_KEY`: OpenAI API key
-- `OPENAI_MODEL`: OpenAI model to use (default: gpt-4o-mini)
-- `GITHUB_TOKEN`: GitHub API token for repository access
-- `PROJECT_DIR`: Directory containing project files (default: ".")
-- `MAX_WORKERS`: Maximum number of worker threads (default: 5)
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Add new methods to the `LangGraphSlackInterface` class in `slack_interface.py`
+2. Register new event handlers in `langgraph_main.py` if needed
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+[MIT License](LICENSE)
