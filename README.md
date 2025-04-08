@@ -5,6 +5,13 @@ A sophisticated multi-agent system for project management and document processin
 1. **AI User Agent** - Initiates requests and manages project requirements
 2. **Assistant Agent** - Processes requests and implements solutions
 
+## Important Documentation
+
+Before working on this project, please read the following documents:
+
+- [REQUIREMENTStodo.md](REQUIREMENTStodo.md) - Contains comprehensive instructions and requirements
+- [PLANTODO.md](PLANTODO.md) - Detailed implementation plan with tasks and timelines
+
 ## Features
 
 - **Multi-Threading Architecture**: Concurrent request handling with thread-safe state management
@@ -13,6 +20,7 @@ A sophisticated multi-agent system for project management and document processin
 - **Project Management**: Task tracking, dependency management, and progress monitoring
 - **Slack Integration**: Seamless communication between agents and users
 - **Multi-Project Support**: Manage multiple GitHub repositories simultaneously
+- **MCP Integration**: Tool registry for dynamic capability extension
 
 ## Architecture
 
