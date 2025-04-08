@@ -11,6 +11,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from src.integrations.slack import SlackIntegration
 from src.workflows.implementation_phases import ImplementationPhases
+from src.workflows.langgraph_workflow import LangGraphWorkflow
 
 # Configure logging
 logging.basicConfig(
@@ -36,7 +37,15 @@ slack_integration = SlackIntegration(
 implementation_phases = ImplementationPhases(
     ai_user_agent=slack_integration.ai_user_agent,
     assistant_agent=slack_integration.assistant_agent,
-    project_dir=os.environ.get("PROJECT_DIR", ".")
+    project_dir=os.environ.get("PROJECT_DIR", "."),
+    model_name=os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+)
+
+# Initialize LangGraph Workflow
+langgraph_workflow = LangGraphWorkflow(
+    ai_user_agent=slack_integration.ai_user_agent,
+    assistant_agent=slack_integration.assistant_agent,
+    model_name=os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 )
 
 @slack_app.event("app_mention")
@@ -60,6 +69,35 @@ def handle_app_mention_events(body, say):
             channel=channel_id,
             thread_ts=thread_ts
         )
+
+async def process_message_with_langgraph(message, task_id=None, project_name=None, repo_name=None):
+    """
+    Process a message using the LangGraph workflow.
+    
+    Args:
+        message: Message to process
+        task_id: Task ID (optional)
+        project_name: Project name (optional)
+        repo_name: Repository name (optional)
+        
+    Returns:
+        Result of the workflow execution
+    """
+    try:
+        # Process the message using LangGraph workflow
+        result = await langgraph_workflow.process_message(
+            message=message,
+            task_id=task_id,
+            project_name=project_name,
+            repo_name=repo_name
+        )
+        
+        logger.info(f"Message processed with LangGraph workflow: {message[:50]}...")
+        return result
+    
+    except Exception as e:
+        logger.error(f"Error processing message with LangGraph workflow: {str(e)}", exc_info=True)
+        raise
 
 async def execute_implementation_phases(repo_name=None):
     """Execute all implementation phases."""

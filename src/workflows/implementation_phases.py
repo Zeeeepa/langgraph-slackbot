@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from src.agents.ai_user_agent import AIUserAgent
 from src.agents.assistant_agent import AssistantAgent, Task, TaskPriority
+from src.workflows.langgraph_workflow import LangGraphWorkflow
 
 # Configure logging
 logging.basicConfig(
@@ -37,7 +38,8 @@ class ImplementationPhases:
     def __init__(self, 
                  ai_user_agent: AIUserAgent,
                  assistant_agent: AssistantAgent,
-                 project_dir: str = "."):
+                 project_dir: str = ".",
+                 model_name: str = "gpt-4o-mini"):
         """
         Initialize the implementation phases.
         
@@ -45,11 +47,19 @@ class ImplementationPhases:
             ai_user_agent: AI User Agent instance
             assistant_agent: Assistant Agent instance
             project_dir: Directory containing project files
+            model_name: LLM model to use
         """
         self.ai_user_agent = ai_user_agent
         self.assistant_agent = assistant_agent
         self.project_dir = Path(project_dir)
         self.implementation_plan = None
+        
+        # Initialize LangGraph workflow
+        self.langgraph_workflow = LangGraphWorkflow(
+            ai_user_agent=ai_user_agent,
+            assistant_agent=assistant_agent,
+            model_name=model_name
+        )
         
     async def phase1_project_initialization(self, repo_name: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -122,31 +132,24 @@ class ImplementationPhases:
         else:
             tasks_to_implement = all_tasks
         
-        # Formulate requests and add tasks to the assistant agent
+        # Process tasks using LangGraph workflow
         task_results = []
         for task in tasks_to_implement:
             # Formulate request
             request = await self.ai_user_agent.formulate_assistant_request(task.get("name"))
             
-            # Add task to assistant agent
-            priority = task.get("priority", "medium").lower()
-            dependencies = task.get("dependencies", [])
-            
-            assistant_task = self.assistant_agent.add_task(
+            # Execute task using LangGraph workflow
+            result = await self.langgraph_workflow.execute_task(
                 task_id=task.get("name"),
-                description=request,
-                priority=priority,
-                dependencies=dependencies
+                description=request
             )
             
-            # Wait for task to complete
-            while assistant_task.status.value != "completed" and assistant_task.status.value != "failed":
-                await asyncio.sleep(1.0)
-                self.assistant_agent.check_dependencies()
-            
-            # Get task result
-            task_result = self.assistant_agent.get_task_status(task.get("name"))
-            task_results.append(task_result)
+            # Add task result
+            task_results.append({
+                "task_id": task.get("name"),
+                "description": request,
+                "result": result
+            })
         
         logger.info(f"Completed Phase 2: Development Cycle - {len(task_results)} tasks processed")
         return task_results
@@ -242,18 +245,39 @@ class ImplementationPhases:
         # Formulate further requests
         further_requests = await self.ai_user_agent.formulate_further_requests(analysis)
         
+        # Process further requests using LangGraph workflow
+        further_results = []
+        for request in further_requests:
+            # Generate a unique task ID
+            task_id = f"further-{len(further_results) + 1}"
+            
+            # Execute task using LangGraph workflow
+            result = await self.langgraph_workflow.process_message(
+                message=request,
+                task_id=task_id
+            )
+            
+            # Add result
+            further_results.append({
+                "task_id": task_id,
+                "request": request,
+                "result": result
+            })
+        
         # Save analysis and further requests
         analysis_path = self.project_dir / "post_merge_analysis.json"
         with open(analysis_path, "w", encoding="utf-8") as f:
             json.dump({
                 "analysis": analysis,
-                "further_requests": further_requests
+                "further_requests": further_requests,
+                "further_results": further_results
             }, f, indent=2)
         
         logger.info(f"Completed Phase 4: Post-Merge Analysis - {len(further_requests)} further requests identified")
         return {
             "analysis": analysis,
-            "further_requests": further_requests
+            "further_requests": further_requests,
+            "further_results": further_results
         }
     
     async def execute_all_phases(self, repo_name: Optional[str] = None) -> Dict[str, Any]:
